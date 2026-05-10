@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Crate Blockchain Viewer</title>
+    <style>
+        body { font-family: 'Inter', sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; margin: 0; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .card { background: #1e293b; padding: 1.5rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #334155; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .badge.critical { background: #7f1d1d; color: #fca5a5; }
+        .badge.safe { background: #14532d; color: #86efac; }
+        button { background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 10px; }
+        button:hover { background: #2563eb; }
+        pre { background: #000; padding: 1rem; border-radius: 4px; overflow-x: auto; color: #4ade80; }
+        .hash { font-family: monospace; color: #93c5fd; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📦 Smart Crate Blockchain Demo</h1>
+        <p>This page visually interacts with your blockchain API backend.</p>
+
+        <div class="card">
+            <h2>1. Generate Sample Telemetry</h2>
+            <p>Click below to simulate a crate sending data to the backend.</p>
+            <button onclick="sendData('SAFE')">Send Normal Data (Safe)</button>
+            <button onclick="sendData('CRITICAL')" style="background: #ef4444;">Send Shock/Temperature Alert (Critical)</button>
+            <div id="ingest-result" style="margin-top: 10px;"></div>
+        </div>
+
+        <div class="card">
+            <h2>2. Blockchain Audit Trail</h2>
+            <p>View all critical events locked onto the local blockchain for this crate.</p>
+            <button onclick="fetchAudit()">Refresh Blockchain Audit Log</button>
+            <div id="audit-result" style="margin-top: 10px;"></div>
+        </div>
+
+        <div class="card">
+            <h2>3. Cryptographic Verification</h2>
+            <p>Enter a Timestamp from the Audit Trail above to verify its cryptographic integrity.</p>
+            <input type="number" id="verify-timestamp" placeholder="e.g. 1713800000" style="padding: 8px; width: 200px; background: #334155; color: white; border: 1px solid #475569; border-radius: 4px;">
+            <button onclick="verifyData()" style="background: #10b981;">Verify Hash Integrity</button>
+            <div id="verify-result" style="margin-top: 10px;"></div>
+        </div>
+    </div>
+
+    <script>
+        const CRATE_ID = "DEMO-CRATE-999";
+
+        async function sendData(type) {
+            const resultDiv = document.getElementById('ingest-result');
+            resultDiv.innerHTML = "<i>Sending data...</i>";
+            
+            const isCritical = type === 'CRITICAL';
+            const payload = {
+                crateId: CRATE_ID,
+                timestamp: Date.now(),
+                temperature: isCritical ? 15.5 : 4.0,
+                humidity: 45.0,
+                shock: isCritical ? 12.0 : 1.5,
+                riskScore: type
+            };
+
+            try {
+                const res = await fetch('/api/ingest/readings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                
+                let html = `<pre>Sent: ${JSON.stringify(payload, null, 2)}</pre>`;
+                if (data.blockchainLogged) {
+                    html += `<p>✅ <b>Logged to Blockchain!</b> Transaction Hash: <span class="hash">${data.txHash}</span></p>`;
+                    // Auto refresh audit log
+                    setTimeout(fetchAudit, 1500); 
+                } else {
+                    html += `<p>ℹ️ Data saved locally. (Skipped blockchain because risk score was SAFE).</p>`;
+                }
+                resultDiv.innerHTML = html;
+                
+                if (isCritical) {
+                    document.getElementById('verify-timestamp').value = payload.timestamp;
+                }
+
+            } catch (err) {
+                resultDiv.innerHTML = `<span style="color:red">Error: ${err.message}</span>`;
+            }
+        }
+
+        async function fetchAudit() {
+            const resultDiv = document.getElementById('audit-result');
+            resultDiv.innerHTML = "<i>Fetching from blockchain...</i>";
+            try {
+                const res = await fetch(`/api/audit/${CRATE_ID}`);
+                const data = await res.json();
+                
+                if (data.history.length === 0) {
+                    resultDiv.innerHTML = "<p>No critical events found on the blockchain for this crate yet.</p>";
+                    return;
+                }
+
+                let html = `<ul>`;
+                data.history.forEach(ev => {
+                    const date = new Date(ev.timestamp).toLocaleString();
+                    html += `<li style="margin-bottom:10px; background:#0f172a; padding:10px; border-radius:4px;">
+                        <span class="badge critical">${ev.eventType}</span> 
+                        <b>Time:</b> ${date} (Timestamp: <code>${ev.timestamp}</code>)<br>
+                        <b>Hash:</b> <span class="hash">${ev.dataHash}</span>
+                    </li>`;
+                });
+                html += `</ul>`;
+                resultDiv.innerHTML = html;
+            } catch (err) {
+                resultDiv.innerHTML = `<span style="color:red">Error: ${err.message}</span>`;
+            }
+        }
+
+        async function verifyData() {
+            const ts = document.getElementById('verify-timestamp').value;
+            const resultDiv = document.getElementById('verify-result');
+            if (!ts) return alert("Please enter a timestamp!");
+            
+            resultDiv.innerHTML = "<i>Verifying cryptography...</i>";
+            try {
+                const res = await fetch(`/api/verify/${CRATE_ID}/${ts}`);
+                const data = await res.json();
+                
+                if (data.error) {
+                    resultDiv.innerHTML = `<div style="background: #7f1d1d; padding: 1rem; border-radius: 4px; border: 1px solid #f87171; margin-top: 10px;">
+                            <h3 style="color: #fca5a5; margin-top:0;">❌ Error!</h3>
+                            <p>${data.error}</p>
+                        </div>`;
+                } else if (data.verified) {
+                    resultDiv.innerHTML = `
+                        <div style="background: #14532d; padding: 1rem; border-radius: 4px; border: 1px solid #4ade80; margin-top: 10px;">
+                            <h3 style="color: #4ade80; margin-top:0;">✅ Cryptographic Match Confirmed</h3>
+                            <p>The local database record exactly matches the immutable blockchain hash.</p>
+                            <code>Hash: ${data.blockchainData.dataHash}</code>
+                        </div>`;
+                } else if (data.reason && data.reason.includes('not logged')) {
+                    resultDiv.innerHTML = `<p>⚠️ This timestamp belongs to a SAFE event. Safe events are not stored on the blockchain.</p>`;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div style="background: #7f1d1d; padding: 1rem; border-radius: 4px; border: 1px solid #f87171; margin-top: 10px;">
+                            <h3 style="color: #fca5a5; margin-top:0;">❌ Verification Failed!</h3>
+                            <p>${data.reason || 'Unknown error'}</p>
+                        </div>`;
+                }
+            } catch (err) {
+                resultDiv.innerHTML = `<span style="color:red">Error: ${err.message}</span>`;
+            }
+        }
+        
+        // Initial load
+        fetchAudit();
+    </script>
+</body>
+</html>
